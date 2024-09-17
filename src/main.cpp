@@ -3,10 +3,12 @@
 #define sensorCount 21
 
 const int left = 1;
-const int right = 2;
+const int right = 2;    // velg en annen pin (GPIO 2 = led_buitlin)
+const int minDiff = 100;
 
 QTRSensors qtr;                      // Opprett et QTR-sensorobjekt
 uint16_t sensorValues[sensorCount];  // Array for å lagre sensorverdier
+uint16_t startValues[sensorCount];   // Array for å lagre startverdier
 
 void setup() {
     // Definer sensorpinnene
@@ -14,6 +16,9 @@ void setup() {
     //                                       1   2   3   4    5   6   7   8  9  10  11 12  13  14  15  16  17  18 19  20  21
     // Start kommunikasjon med Serial Monitor
     Serial.begin(9600);
+
+    //pinMode (left, OUTPUT);   // ødelegger koden
+    pinMode (right, OUTPUT);
 
     // Sett alle sensorpinner til INPUT
     for (uint8_t i = 0; i < sensorCount; i++) {
@@ -24,9 +29,11 @@ void setup() {
     qtr.setTypeRC();                             // Sett sensorene til RC-typen
     qtr.setSensorPins(sensorPins, sensorCount);  // Sett sensorpinnene og antallet sensorer
 
-    Serial.println("Sensor setup complete.");
-}
+    // Les og lagre startverdiene ved oppstart
+    qtr.read(startValues);  // Les startverdiene og lagre dem i startValues-arrayet
 
+    Serial.println("Sensor setup complete. Startverdier lagret.");
+}
 void loop() {
     // Les verdier fra sensorene
     qtr.read(sensorValues);  // Les sensorverdiene
@@ -36,6 +43,10 @@ void loop() {
         Serial.print(i + 1);  // Skriv ut sensornummer (starter fra 1)
         Serial.print(": ");
         Serial.print(sensorValues[i]);  // Skriv ut sensorverdi
+        Serial.print("\tStartverdi: ");
+        Serial.print(startValues[i]);   // Skriv ut startverdien for sammenligning
+        Serial.print("\tDiff: ");
+        Serial.print(sensorValues[i] - startValues[i]);  // Skriv ut differansen
         Serial.print("\t");             // Legg til en tab for å formatere
     }
     Serial.println();  // Ny linje etter alle sensorverdiene
