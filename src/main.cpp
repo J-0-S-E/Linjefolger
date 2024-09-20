@@ -1,55 +1,93 @@
 #include <Arduino.h>
 #include <QTRSensors.h>
-#define sensorCount 21
+#define sensorCount 13
 
-const int left = 1;
-const int right = 2;    // velg en annen pin (GPIO 2 = led_buitlin)
-const int minDiff = 100;
+const int left = 2;
+const int right = 15;
+const int minDiff = 40;
 
-QTRSensors qtr;                      // Opprett et QTR-sensorobjekt
-uint16_t sensorValues[sensorCount];  // Array for å lagre sensorverdier
-uint16_t startValues[sensorCount];   // Array for å lagre startverdier
+// Opprett et QTR-sensorobjekt og arrays for sensordata
+QTRSensors qtr;
+uint16_t sensorValues[sensorCount];
+uint16_t startValues[sensorCount];
 
+// Motorhastigheter for hver sensor
+const int motorSpeeds[][2] = {
+    {0, 255},    // Sensor 25, motorjustering for venstre og høyre
+    {100, 200},  // Sensor 23
+    {120, 200},  // Sensor 21
+    {130, 200},  // Sensor 19
+    {140, 200},  // Sensor 17
+    {150, 200},  // Sensor 15
+    {160, 200},  // Sensor 13
+    {170, 200},  // Sensor 11
+    {255, 255},  // Sensor 9
+    {200, 170},  // Sensor 7
+    {200, 160},  // Sensor 5
+    {200, 150},  // Sensor 3
+    {200, 140},  // Sensor 1
+};
+
+// Definer sensorpinnene
+const uint8_t sensorPins[sensorCount] = {32, 33, 25, 26, 27, 14, 12, 13, 23, 22, 21, 19, 18};
+//                    Sensor-pinner:     25  23  21  19  17  15  13  11   9   7   5   3   1
 void setup() {
-    // Definer sensorpinnene
-    const uint8_t sensorPins[sensorCount] = {13, 12, 14, 27, 26, 25, 33, 32, 17, 3, 4, 16, 17, 18, 20, 21, 22, 5, 22, 23, 15};
-    //                                       1   2   3   4    5   6   7   8  9  10  11 12  13  14  15  16  17  18 19  20  21
-    // Start kommunikasjon med Serial Monitor
     Serial.begin(9600);
+    pinMode(left, OUTPUT);
+    pinMode(right, OUTPUT);
 
-    //pinMode (left, OUTPUT);   // ødelegger koden
-    pinMode (right, OUTPUT);
-
-    // Sett alle sensorpinner til INPUT
     for (uint8_t i = 0; i < sensorCount; i++) {
         pinMode(sensorPins[i], INPUT);
     }
 
-    // Konfigurer sensorene
-    qtr.setTypeRC();                             // Sett sensorene til RC-typen
-    qtr.setSensorPins(sensorPins, sensorCount);  // Sett sensorpinnene og antallet sensorer
-
-    // Les og lagre startverdiene ved oppstart
-    qtr.read(startValues);  // Les startverdiene og lagre dem i startValues-arrayet
+    qtr.setTypeRC();
+    qtr.setSensorPins(sensorPins, sensorCount);
+    qtr.read(startValues);  // Les og lagre startverdiene ved oppstart
 
     Serial.println("Sensor setup complete. Startverdier lagret.");
 }
-void loop() {
-    // Les verdier fra sensorene
-    qtr.read(sensorValues);  // Les sensorverdiene
 
+// Kombinert funksjon for sensoravlesning og motorstyring
+void linjeOgMotor() {
+    int sisteAktiveSensor = -1;  // Variabel for å spore den nyligste aktive sensoren
+
+    qtr.read(sensorValues);  // Les alle sensorverdiene
+
+    // Gå gjennom sensorene for å finne den nyligste aktive sensoren
     for (uint8_t i = 0; i < sensorCount; i++) {
-        Serial.print("Sensor ");
-        Serial.print(i + 1);  // Skriv ut sensornummer (starter fra 1)
-        Serial.print(": ");
-        Serial.print(sensorValues[i]);  // Skriv ut sensorverdi
-        Serial.print("\tStartverdi: ");
-        Serial.print(startValues[i]);   // Skriv ut startverdien for sammenligning
-        Serial.print("\tDiff: ");
-        Serial.print(sensorValues[i] - startValues[i]);  // Skriv ut differansen
-        Serial.print("\t");             // Legg til en tab for å formatere
+        if ( ( abs(sensorValues[i] - startValues[i]) > minDiff) ) {
+            sisteAktiveSensor = i;  // Oppdater med den nyligst aktive sensoren
+        }
     }
-    Serial.println();  // Ny linje etter alle sensorverdiene
 
-    delay(1000);  // Vent ett sekund mellom hver lesing
+    // Hvis en aktiv sensor ble funnet, juster motorene
+    if (sisteAktiveSensor != -1) {
+        analogWrite(left, motorSpeeds[sisteAktiveSensor][0]);   // Bruk motorhastigheten for den nyligst aktive sensoren
+        analogWrite(right, motorSpeeds[sisteAktiveSensor][1]);  // Bruk motorhastigheten for den nyligst aktive sensoren
+    } else {
+        // Hvis ingen sensor har oppdaget en linje, stopp motorene
+        analogWrite(left, 0);
+        analogWrite(right, 0);
+    }
+}
+
+void loop() {
+    linjeOgMotor();  // Kjør linjefølger og motorstyring i én funksjon
+
+    // Valgfri: Skriv ut sensorverdier for feilsøking
+   /* for (uint8_t i = 0; i < sensorCount; i++) {
+        Serial.print("S");
+        Serial.print(sensorPins[i]);  // Skriv ut sensornummeret basert på sensorPins[]-arrayet
+        Serial.print(":");
+        Serial.print(sensorValues[i]);
+        Serial.print(" St:");
+        Serial.print(startValues[i]);
+        Serial.print(" D:");
+        Serial.print(sensorValues[i] - startValues[i]);
+        Serial.print(" ");
+    }
+
+    delay(1000);  // Vent ett sekund mellom hver syklus
+    Serial.println();
+    Serial.println();*/
 }
