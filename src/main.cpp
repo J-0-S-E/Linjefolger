@@ -1,55 +1,198 @@
 #include <Arduino.h>
 #include <QTRSensors.h>
-#define sensorCount 21
 
-const int left = 1;
-const int right = 2;    // velg en annen pin (GPIO 2 = led_buitlin)
-const int minDiff = 100;
+#define sensorCount 15
 
-QTRSensors qtr;                      // Opprett et QTR-sensorobjekt
-uint16_t sensorValues[sensorCount];  // Array for å lagre sensorverdier
-uint16_t startValues[sensorCount];   // Array for å lagre startverdier
+const int leftF = 2;
+const int leftB = 4;
+const int rightF = 15;
+const int rightB = 16;
+const int minDiff = 40;
+
+float lastPositionError = 0; // For å huske siste kjente posisjonsfeil
+unsigned long lastActiveTime = 0; // Tidspunkt for siste aktive sensor
+const unsigned long maxInactiveDuration = 1000; // Maksimum inaktiv tid i millisekunder
+
+// Opprett et QTR-sensorobjekt og arrays for sensordata
+QTRSensors qtr;
+uint16_t sensorValues[sensorCount];
+uint16_t startValues[sensorCount];
+
+// Definer sensorpinnene (oppdatert med nye sensorer)
+const uint8_t sensorPins[sensorCount] = {
+    32, // Sensor 0 (venstre ytterste)
+    5,  // Sensor 1 (ny sensor på pinne 5)
+    33, // Sensor 2
+    25, // Sensor 3
+    26, // Sensor 4
+    27, // Sensor 5
+    14, // Sensor 6
+    12, // Sensor 7 (midten)
+    17, // Sensor 8 (ny sensor på pinne 17)
+    13, // Sensor 9
+    23, // Sensor 10
+    22, // Sensor 11
+    21, // Sensor 12
+    19, // Sensor 13
+    18  // Sensor 14 (høyre ytterste)
+};
+
+// Definer sensorvekter for vekting (oppdatert for nye sensorer)
+int sensorWeights[sensorCount] = {
+    -20, // Sensor 0
+    -13, // Sensor 1 (ny sensor)
+    -9, // Sensor 2
+    -7, // Sensor 3
+    -5, // Sensor 4
+    -3, // Sensor 5
+    -1, // Sensor 6
+     0, // Sensor 7 (midten)
+     1, // Sensor 8 (ny sensor)
+     3, // Sensor 9
+     5, // Sensor 10
+     7, // Sensor 11
+     9, // Sensor 12
+     13, // Sensor 13
+     20  // Sensor 14
+};
 
 void setup() {
-    // Definer sensorpinnene
-    const uint8_t sensorPins[sensorCount] = {13, 12, 14, 27, 26, 25, 33, 32, 17, 3, 4, 16, 17, 18, 20, 21, 22, 5, 22, 23, 15};
-    //                                       1   2   3   4    5   6   7   8  9  10  11 12  13  14  15  16  17  18 19  20  21
-    // Start kommunikasjon med Serial Monitor
     Serial.begin(9600);
 
-    //pinMode (left, OUTPUT);   // ødelegger koden
-    pinMode (right, OUTPUT);
+    pinMode(leftF, OUTPUT);
+    pinMode(rightF, OUTPUT);
+    pinMode(leftB, OUTPUT);
+    pinMode(rightB, OUTPUT);
 
-    // Sett alle sensorpinner til INPUT
     for (uint8_t i = 0; i < sensorCount; i++) {
         pinMode(sensorPins[i], INPUT);
     }
 
-    // Konfigurer sensorene
-    qtr.setTypeRC();                             // Sett sensorene til RC-typen
-    qtr.setSensorPins(sensorPins, sensorCount);  // Sett sensorpinnene og antallet sensorer
+    qtr.setTypeRC();
+    qtr.setSensorPins(sensorPins, sensorCount);
+    qtr.read(startValues);  // Les og lagre startverdiene ved oppstart
 
-    // Les og lagre startverdiene ved oppstart
-    qtr.read(startValues);  // Les startverdiene og lagre dem i startValues-arrayet
+    lastActiveTime = millis(); // Initialiser siste aktive tid
 
-    Serial.println("Sensor setup complete. Startverdier lagret.");
+    Serial.println("Sensoroppsett fullført. Startverdier lagret.");
 }
-void loop() {
-    // Les verdier fra sensorene
-    qtr.read(sensorValues);  // Les sensorverdiene
 
-    for (uint8_t i = 0; i < sensorCount; i++) {
-        Serial.print("Sensor ");
-        Serial.print(i + 1);  // Skriv ut sensornummer (starter fra 1)
-        Serial.print(": ");
-        Serial.print(sensorValues[i]);  // Skriv ut sensorverdi
-        Serial.print("\tStartverdi: ");
-        Serial.print(startValues[i]);   // Skriv ut startverdien for sammenligning
-        Serial.print("\tDiff: ");
-        Serial.print(sensorValues[i] - startValues[i]);  // Skriv ut differansen
-        Serial.print("\t");             // Legg til en tab for å formatere
+void setMotorSpeed(int leftSpeed, int rightSpeed) {
+    // Venstre motor
+    if (leftSpeed > 0) {
+        analogWrite(leftF, leftSpeed);
+        analogWrite(leftB, 0);
+    } else if (leftSpeed < 0) {
+        analogWrite(leftF, 0);
+        analogWrite(leftB, -leftSpeed);
+    } else {
+        analogWrite(leftF, 0);
+        analogWrite(leftB, 0);
     }
-    Serial.println();  // Ny linje etter alle sensorverdiene
 
-    delay(1000);  // Vent ett sekund mellom hver lesing
+    // Høyre motor
+    if (rightSpeed > 0) {
+        analogWrite(rightF, rightSpeed);
+        analogWrite(rightB, 0);
+    } else if (rightSpeed < 0) {
+        analogWrite(rightF, 0);
+        analogWrite(rightB, -rightSpeed);
+    } else {
+        analogWrite(rightF, 0);
+        analogWrite(rightB, 0);
+    }
+}
+
+void linjeOgMotor() {
+    const int maxSpeed = 255; // Maksimal motorhastighet
+    const int baseSpeed = 120; // Grunnhastighet når ikke perfekt justert
+
+    qtr.read(sensorValues);   // Les alle sensorverdiene
+
+    int weightedSum = 0;
+    int totalActiveSensors = 0;
+    bool anySensorActive = false;
+
+    // Iterer over alle sensorene
+    for (int i = 0; i < sensorCount; i++) {
+        int diff = abs(sensorValues[i] - startValues[i]);
+        if (diff > minDiff) {
+            // Sensor er aktiv
+            weightedSum += sensorWeights[i];
+            totalActiveSensors++;
+            anySensorActive = true;
+        }
+    }
+
+    // Oppdater siste aktive tid hvis noen sensorer er aktive
+    if (anySensorActive) {
+        lastActiveTime = millis();
+    }
+
+    // Sjekk om maks inaktiv tid er overskredet
+    if (millis() - lastActiveTime >= maxInactiveDuration) {
+        // Stopper motorene
+        setMotorSpeed(0, 0);
+        Serial.println("Ingen sensorer aktive i over 1 sekund. Stopper motorene.");
+        return; // Avslutt funksjonen
+    }
+
+    float positionError = 0;
+
+    if (totalActiveSensors > 0) {
+        // Beregn posisjonsfeil
+        positionError = (float)weightedSum / totalActiveSensors;
+    } else {
+        // Ingen sensorer er aktive, bruk siste kjente posisjonsfeil
+        positionError = lastPositionError;
+        Serial.println("Ingen sensorer aktive, bruker siste kjente posisjonsfeil");
+    }
+
+    // Beregn derivatet av posisjonsfeilen
+    float derivative = positionError - lastPositionError;
+
+    // Oppdaterer siste kjente posisjonsfeil
+    lastPositionError = positionError;
+
+    // Juster motorene basert på posisjonsfeilen og derivatet
+    float Kp = 10.0; // Proporsjonal konstant
+    float Kd = 15.0; // Derivatkonstant
+
+    int correction = (int)(Kp * positionError + Kd * derivative);
+
+    // Bestem basehastigheten basert på posisjonsfeilen
+    int currentBaseSpeed;
+    if (positionError == 0) {
+        currentBaseSpeed = maxSpeed; // Maksimal hastighet når perfekt justert
+    } else {
+        currentBaseSpeed = baseSpeed; // Grunnhastighet ellers
+    }
+
+    int leftMotorSpeed = currentBaseSpeed + correction;
+    int rightMotorSpeed = currentBaseSpeed - correction;
+
+    // Begrens motorhastighetene til gyldig område (-maxSpeed til +maxSpeed)
+    leftMotorSpeed = constrain(leftMotorSpeed, -maxSpeed, maxSpeed);
+    rightMotorSpeed = constrain(rightMotorSpeed, -maxSpeed, maxSpeed);
+
+    // Sett motorhastighetene
+    setMotorSpeed(leftMotorSpeed, rightMotorSpeed);
+
+    // Debugging-utskrifter
+    Serial.print("Posisjonsfeil: ");
+    Serial.println(positionError);
+    Serial.print("Derivat: ");
+    Serial.println(derivative);
+    Serial.print("Basehastighet: ");
+    Serial.println(currentBaseSpeed);
+    Serial.print("Venstre motorhastighet: ");
+    Serial.println(leftMotorSpeed);
+    Serial.print("Høyre motorhastighet: ");
+    Serial.println(rightMotorSpeed);
+}
+
+
+void loop() {
+    linjeOgMotor();  // Kjør funksjonen for å sjekke sensorverdier og motorstyring
+    // Ingen delay for raskere respons
 }
