@@ -39,21 +39,21 @@ const uint8_t sensorPins[sensorCount] = {
 
 // Definer sensorvekter for vekting (oppdatert for nye sensorer)
 int sensorWeights[sensorCount] = {
-    -20, // Sensor 0
-    -13, // Sensor 1 (ny sensor)
-    -9, // Sensor 2
-    -7, // Sensor 3
-    -5, // Sensor 4
-    -3, // Sensor 5
+    -15, // Sensor 0
+    -9, // Sensor 1 (ny sensor)
+    -7, // Sensor 2
+    -5, // Sensor 3
+    -3, // Sensor 4
+    -2, // Sensor 5
     -1, // Sensor 6
      0, // Sensor 7 (midten)
      1, // Sensor 8 (ny sensor)
-     3, // Sensor 9
-     5, // Sensor 10
-     7, // Sensor 11
-     9, // Sensor 12
-     13, // Sensor 13
-     20  // Sensor 14
+     2, // Sensor 9
+     3, // Sensor 10
+     5, // Sensor 11
+     7, // Sensor 12
+     9, // Sensor 13
+     15  // Sensor 14
 };
 
 void setup() {
@@ -155,8 +155,8 @@ void linjeOgMotor() {
     lastPositionError = positionError;
 
     // Juster motorene basert på posisjonsfeilen og derivatet
-    float Kp = 10.0; // Proporsjonal konstant
-    float Kd = 15.0; // Derivatkonstant
+    float Kp = 15.0; // Proporsjonal konstant
+    float Kd = 25.0; // Derivatkonstant
 
     int correction = (int)(Kp * positionError + Kd * derivative);
 
