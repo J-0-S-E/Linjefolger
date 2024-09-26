@@ -8,27 +8,26 @@ const int leftB = 4;
 const int rightF = 15;
 const int rightB = 16;
 const int minDiff = 40;
-
 float lastPositionError = 0; // For å huske siste kjente posisjonsfeil
-unsigned long lastActiveTime = 0; // Tidspunkt for siste aktive sensor
-const unsigned long maxInactiveDuration = 1000; // Maksimum inaktiv tid i millisekunder
+float integral = 0;          // For integralleddet
+unsigned long lastTime = 0;  // For tidsberegning
 
 // Opprett et QTR-sensorobjekt og arrays for sensordata
 QTRSensors qtr;
 uint16_t sensorValues[sensorCount];
 uint16_t startValues[sensorCount];
 
-// Definer sensorpinnene (oppdatert med nye sensorer)
+// Definer sensorpinnene
 const uint8_t sensorPins[sensorCount] = {
     32, // Sensor 0 (venstre ytterste)
-    5,  // Sensor 1 (ny sensor på pinne 5)
+    5,  // Sensor 1
     33, // Sensor 2
     25, // Sensor 3
     26, // Sensor 4
     27, // Sensor 5
     14, // Sensor 6
     12, // Sensor 7 (midten)
-    17, // Sensor 8 (ny sensor på pinne 17)
+    17, // Sensor 8
     13, // Sensor 9
     23, // Sensor 10
     22, // Sensor 11
@@ -37,23 +36,23 @@ const uint8_t sensorPins[sensorCount] = {
     18  // Sensor 14 (høyre ytterste)
 };
 
-// Definer sensorvekter for vekting (oppdatert for nye sensorer)
+// Definer sensorvekter for beregning av posisjonsfeil
 int sensorWeights[sensorCount] = {
-    -20, // Sensor 0
-    -13, // Sensor 1 (ny sensor)
-    -9, // Sensor 2
-    -7, // Sensor 3
-    -5, // Sensor 4
-    -3, // Sensor 5
-    -1, // Sensor 6
-     0, // Sensor 7 (midten)
-     1, // Sensor 8 (ny sensor)
-     3, // Sensor 9
-     5, // Sensor 10
-     7, // Sensor 11
-     9, // Sensor 12
-     13, // Sensor 13
-     20  // Sensor 14
+    -7,  // Sensor 0
+    -10,  // Sensor 1
+    -5,  // Sensor 2
+    -4,  // Sensor 3
+    -3,  // Sensor 4
+    -2,  // Sensor 5
+    -1,  // Sensor 6
+     0,  // Sensor 7 (midten)
+     1,  // Sensor 8
+     2,  // Sensor 9
+     3,  // Sensor 10
+     4,  // Sensor 11
+     5,  // Sensor 12
+     10,  // Sensor 13
+     7   // Sensor 14
 };
 
 void setup() {
@@ -70,121 +69,121 @@ void setup() {
 
     qtr.setTypeRC();
     qtr.setSensorPins(sensorPins, sensorCount);
+    delay(500); // Vent litt før lesing av startverdier
     qtr.read(startValues);  // Les og lagre startverdiene ved oppstart
 
-    lastActiveTime = millis(); // Initialiser siste aktive tid
+    lastTime = millis(); // Initialiser tid
 
     Serial.println("Sensoroppsett fullført. Startverdier lagret.");
 }
 
 void setMotorSpeed(int leftSpeed, int rightSpeed) {
+    // Begrens hastighetene til -255 til 255
+    leftSpeed = constrain(leftSpeed, -255, 255);
+    rightSpeed = constrain(rightSpeed, -255, 255);
+
     // Venstre motor
-    if (leftSpeed > 0) {
+    if (leftSpeed >= 0) {
         analogWrite(leftF, leftSpeed);
         analogWrite(leftB, 0);
-    } else if (leftSpeed < 0) {
-        analogWrite(leftF, 0);
-        analogWrite(leftB, -leftSpeed);
     } else {
         analogWrite(leftF, 0);
-        analogWrite(leftB, 0);
+        analogWrite(leftB, -leftSpeed);
     }
 
     // Høyre motor
-    if (rightSpeed > 0) {
+    if (rightSpeed >= 0) {
         analogWrite(rightF, rightSpeed);
         analogWrite(rightB, 0);
-    } else if (rightSpeed < 0) {
-        analogWrite(rightF, 0);
-        analogWrite(rightB, -rightSpeed);
     } else {
         analogWrite(rightF, 0);
-        analogWrite(rightB, 0);
+        analogWrite(rightB, -rightSpeed);
     }
 }
 
 void linjeOgMotor() {
-    const int maxSpeed = 255; // Maksimal motorhastighet
-    const int baseSpeed = 120; // Grunnhastighet når ikke perfekt justert
+    const int maxSpeed = 150; // Maksimal motorhastighet
+    const int baseSpeed = 150; // Grunnhastighet
 
     qtr.read(sensorValues);   // Les alle sensorverdiene
 
     int weightedSum = 0;
-    int totalActiveSensors = 0;
-    bool anySensorActive = false;
+    int totalWeight = 0;
+
+    bool outerLeftActive = false;
+    bool outerRightActive = false;
 
     // Iterer over alle sensorene
     for (int i = 0; i < sensorCount; i++) {
         int diff = abs(sensorValues[i] - startValues[i]);
         if (diff > minDiff) {
             // Sensor er aktiv
-            weightedSum += sensorWeights[i];
-            totalActiveSensors++;
-            anySensorActive = true;
+            int weight = sensorWeights[i];
+            weightedSum += weight * diff;
+            totalWeight += diff;
+
+            // Sjekk om ytterste sensorer er aktive
+            if (i == 0) {
+                outerLeftActive = true;
+            }
+            if (i == sensorCount - 1) {
+                outerRightActive = true;
+            }
         }
-    }
-
-    // Oppdater siste aktive tid hvis noen sensorer er aktive
-    if (anySensorActive) {
-        lastActiveTime = millis();
-    }
-
-    // Sjekk om maks inaktiv tid er overskredet
-    if (millis() - lastActiveTime >= maxInactiveDuration) {
-        // Stopper motorene
-        setMotorSpeed(0, 0);
-        Serial.println("Ingen sensorer aktive i over 1 sekund. Stopper motorene.");
-        return; // Avslutt funksjonen
     }
 
     float positionError = 0;
 
-    if (totalActiveSensors > 0) {
+    if (totalWeight > 0) {
         // Beregn posisjonsfeil
-        positionError = (float)weightedSum / totalActiveSensors;
+        positionError = (float)weightedSum / totalWeight;
     } else {
-        // Ingen sensorer er aktive, bruk siste kjente posisjonsfeil
-        positionError = lastPositionError;
-        Serial.println("Ingen sensorer aktive, bruker siste kjente posisjonsfeil");
+        // Ingen sensorer er aktive, stopp roboten
+        setMotorSpeed(0, 0);
+        Serial.println("Ingen sensorer aktive, stopper roboten.");
+        return;
     }
 
-    // Beregn derivatet av posisjonsfeilen
-    float derivative = positionError - lastPositionError;
+    // Normaliser posisjonsfeilen til et intervall mellom -1 og 1
+    float normalizedError = positionError / 7.0;
 
-    // Oppdaterer siste kjente posisjonsfeil
-    lastPositionError = positionError;
+    int leftMotorSpeed = 0;
+    int rightMotorSpeed = 0;
 
-    // Juster motorene basert på posisjonsfeilen og derivatet
-    float Kp = 10.0; // Proporsjonal konstant
-    float Kd = 15.0; // Derivatkonstant
-
-    int correction = (int)(Kp * positionError + Kd * derivative);
-
-    // Bestem basehastigheten basert på posisjonsfeilen
-    int currentBaseSpeed;
-    if (positionError == 0) {
-        currentBaseSpeed = maxSpeed; // Maksimal hastighet når perfekt justert
+    // Sjekk om ytterste sensorer er aktive
+    if (outerLeftActive) {
+        // Maks sving til venstre
+        leftMotorSpeed = -maxSpeed;  // Venstre motor bakover
+        rightMotorSpeed = maxSpeed;  // Høyre motor fremover
+        Serial.println("Ytterste venstre sensor aktiv - maksimal sving til venstre.");
+    } else if (outerRightActive) {
+        // Maks sving til høyre
+        leftMotorSpeed = maxSpeed;   // Venstre motor fremover
+        rightMotorSpeed = -maxSpeed; // Høyre motor bakover
+        Serial.println("Ytterste høyre sensor aktiv - maksimal sving til høyre.");
     } else {
-        currentBaseSpeed = baseSpeed; // Grunnhastighet ellers
+        // Vanlig beregning av motorhastigheter
+        // Beregn svingfaktor basert på posisjonsfeil
+        float turnFactor = normalizedError;
+
+        // Beregn hastighetsendring
+        int speedAdjustment = (int)(maxSpeed * turnFactor);
+
+        // Juster motorhastighetene
+        leftMotorSpeed = baseSpeed + speedAdjustment;
+        rightMotorSpeed = baseSpeed - speedAdjustment;
+
+        // Begrens motorhastighetene til -maxSpeed til maxSpeed
+        leftMotorSpeed = constrain(leftMotorSpeed, -maxSpeed, maxSpeed);
+        rightMotorSpeed = constrain(rightMotorSpeed, -maxSpeed, maxSpeed);
     }
-
-    int leftMotorSpeed = currentBaseSpeed + correction;
-    int rightMotorSpeed = currentBaseSpeed - correction;
-
-    // Begrens motorhastighetene til gyldig område (-maxSpeed til +maxSpeed)
-    leftMotorSpeed = constrain(leftMotorSpeed, -maxSpeed, maxSpeed);
-    rightMotorSpeed = constrain(rightMotorSpeed, -maxSpeed, maxSpeed);
 
     // Sett motorhastighetene
     setMotorSpeed(leftMotorSpeed, rightMotorSpeed);
 
     // Debugging-utskrifter
     Serial.print("Posisjonsfeil: ");
-    Serial.println(positionError);
-    Serial.print("Derivat: ");
-    Serial.println(derivative);
-    Serial.print("Basehastighet: ");
-    Serial.println(currentBaseSpeed);
+    Serial.println(normalizedError);
     Serial.print("Venstre motorhastighet: ");
     Serial.println(leftMotorSpeed);
     Serial.print("Høyre motorhastighet: ");
