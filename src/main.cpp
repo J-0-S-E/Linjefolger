@@ -120,13 +120,11 @@ void linjeOgMotor() {
             totalWeight += diff;
             sensorActive = true;
 
-            // Hvis roboten svinger til venstre og en annen sensor enn 0 er aktiv, slutt å svinge til venstre
-            if (turningLeft && i != 0) {
+            // Hvis en sensor innover er aktiv, stopp svingingen
+            if (turningLeft && i > 0) {
                 turningLeft = false;
             }
-
-            // Hvis roboten svinger til høyre og en annen sensor enn 14 er aktiv, slutt å svinge til høyre
-            if (turningRight && i != sensorCount - 1) {
+            if (turningRight && i < sensorCount - 1) {
                 turningRight = false;
             }
         }
@@ -140,13 +138,15 @@ void linjeOgMotor() {
 
     if (turningLeft) {
         setMotorSpeed(-maxSpeed, maxSpeed);
-        Serial.println("Svinger til venstre.");
+        delay(100);
+        Serial.println("Svinger til venstre for å finne linjen igjen.");
         return;
     }
 
     if (turningRight) {
         setMotorSpeed(maxSpeed, -maxSpeed);
-        Serial.println("Svinger til høyre.");
+        Serial.println("Svinger til høyre for å finne linjen igjen.");
+        delay(100);
         return;
     }
 
