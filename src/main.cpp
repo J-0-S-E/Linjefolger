@@ -19,41 +19,45 @@ uint16_t startValues[sensorCount];
 
 // Definer sensorpinnene
 const uint8_t sensorPins[sensorCount] = {
-    32, // Sensor 0 (venstre ytterste)
-    5,  // Sensor 1
-    33, // Sensor 2
-    25, // Sensor 3
-    26, // Sensor 4
-    27, // Sensor 5
-    14, // Sensor 6
-    12, // Sensor 7 (midten)
-    17, // Sensor 8
-    13, // Sensor 9
+    32, // Sensor 25 (venstre ytterste)
+    5,  // Sensor 19
+    33, // Sensor 18
+    25, // Sensor 17
+    26, // Sensor 16
+    27, // Sensor 15
+    14, // Sensor 14
+    12, // Sensor 13 (midten)
+    17, // Sensor 12
+    13, // Sensor 11
     23, // Sensor 10
-    22, // Sensor 11
-    21, // Sensor 12
-    19, // Sensor 13
-    18  // Sensor 14 (høyre ytterste)
+    22, // Sensor 9
+    21, // Sensor 8
+    19, // Sensor 7
+    18  // Sensor 1 (høyre ytterste)
 };
 
 // Definer sensorvekter for beregning av posisjonsfeil
 int sensorWeights[sensorCount] = {
-    -7,  // Sensor 0
-    -10,  // Sensor 1
-    -5,  // Sensor 2
-    -4,  // Sensor 3
-    -3,  // Sensor 4
-    -2,  // Sensor 5
-    -1,  // Sensor 6
-     0,  // Sensor 7 (midten)
-     1,  // Sensor 8
-     2,  // Sensor 9
-     3,  // Sensor 10
-     4,  // Sensor 11
-     5,  // Sensor 12
-     10,  // Sensor 13
-     7   // Sensor 14
+    -10,  // Sensor 0 / 25
+    -6,  // Sensor 1 / 19
+    -5,  // Sensor 2 / 18
+    -4,  // Sensor 3 / 17
+    -3,  // Sensor 4 / 16
+    -2,  // Sensor 5 / 15
+    -1,  // Sensor 6 / 14
+     0,  // Sensor 7 (midten) / 13
+     1,  // Sensor 8 / 12
+     2,  // Sensor 9 / 11
+     3,  // Sensor 10 / 10
+     4,  // Sensor 11 / 9
+     5,  // Sensor 12 / 8
+     6,  // Sensor 13 / 7
+     10   // Sensor 14 / 1
 };
+
+// Tilstander for om roboten skal svinge
+bool turningLeft = false;
+bool turningRight = false;
 
 void setup() {
     Serial.begin(9600);
@@ -69,20 +73,17 @@ void setup() {
 
     qtr.setTypeRC();
     qtr.setSensorPins(sensorPins, sensorCount);
-    delay(500); // Vent litt før lesing av startverdier
-    qtr.read(startValues);  // Les og lagre startverdiene ved oppstart
+    delay(500);
+    qtr.read(startValues);
 
-    lastTime = millis(); // Initialiser tid
-
+    lastTime = millis();
     Serial.println("Sensoroppsett fullført. Startverdier lagret.");
 }
 
 void setMotorSpeed(int leftSpeed, int rightSpeed) {
-    // Begrens hastighetene til -255 til 255
     leftSpeed = constrain(leftSpeed, -255, 255);
     rightSpeed = constrain(rightSpeed, -255, 255);
 
-    // Venstre motor
     if (leftSpeed >= 0) {
         analogWrite(leftF, leftSpeed);
         analogWrite(leftB, 0);
@@ -91,7 +92,6 @@ void setMotorSpeed(int leftSpeed, int rightSpeed) {
         analogWrite(leftB, -leftSpeed);
     }
 
-    // Høyre motor
     if (rightSpeed >= 0) {
         analogWrite(rightF, rightSpeed);
         analogWrite(rightB, 0);
@@ -102,86 +102,82 @@ void setMotorSpeed(int leftSpeed, int rightSpeed) {
 }
 
 void linjeOgMotor() {
-    const int maxSpeed = 150; // Maksimal motorhastighet
-    const int baseSpeed = 150; // Grunnhastighet
+    const int maxSpeed = 150;
+    const int baseSpeed = 150;
 
-    qtr.read(sensorValues);   // Les alle sensorverdiene
+    qtr.read(sensorValues);
 
     int weightedSum = 0;
     int totalWeight = 0;
+    bool sensorActive = false;
 
-    bool outerLeftActive = false;
-    bool outerRightActive = false;
-
-    // Iterer over alle sensorene
     for (int i = 0; i < sensorCount; i++) {
         int diff = abs(sensorValues[i] - startValues[i]);
+
         if (diff > minDiff) {
-            // Sensor er aktiv
             int weight = sensorWeights[i];
             weightedSum += weight * diff;
             totalWeight += diff;
+            sensorActive = true;
 
-            // Sjekk om ytterste sensorer er aktive
-            if (i == 0) {
-                outerLeftActive = true;
+            // Hvis roboten svinger til venstre og en annen sensor enn 0 er aktiv, slutt å svinge til venstre
+            if (turningLeft && i != 0) {
+                turningLeft = false;
             }
-            if (i == sensorCount - 1) {
-                outerRightActive = true;
+
+            // Hvis roboten svinger til høyre og en annen sensor enn 14 er aktiv, slutt å svinge til høyre
+            if (turningRight && i != sensorCount - 1) {
+                turningRight = false;
             }
         }
     }
 
-    float positionError = 0;
-
-    if (totalWeight > 0) {
-        // Beregn posisjonsfeil
-        positionError = (float)weightedSum / totalWeight;
-    } else {
-        // Ingen sensorer er aktive, stopp roboten
+    if (!sensorActive) {
         setMotorSpeed(0, 0);
         Serial.println("Ingen sensorer aktive, stopper roboten.");
         return;
     }
 
-    // Normaliser posisjonsfeilen til et intervall mellom -1 og 1
-    float normalizedError = positionError / 7.0;
-
-    int leftMotorSpeed = 0;
-    int rightMotorSpeed = 0;
-
-    // Sjekk om ytterste sensorer er aktive
-    if (outerLeftActive) {
-        // Maks sving til venstre
-        leftMotorSpeed = -maxSpeed;  // Venstre motor bakover
-        rightMotorSpeed = maxSpeed;  // Høyre motor fremover
-        Serial.println("Ytterste venstre sensor aktiv - maksimal sving til venstre.");
-    } else if (outerRightActive) {
-        // Maks sving til høyre
-        leftMotorSpeed = maxSpeed;   // Venstre motor fremover
-        rightMotorSpeed = -maxSpeed; // Høyre motor bakover
-        Serial.println("Ytterste høyre sensor aktiv - maksimal sving til høyre.");
-    } else {
-        // Vanlig beregning av motorhastigheter
-        // Beregn svingfaktor basert på posisjonsfeil
-        float turnFactor = normalizedError;
-
-        // Beregn hastighetsendring
-        int speedAdjustment = (int)(maxSpeed * turnFactor);
-
-        // Juster motorhastighetene
-        leftMotorSpeed = baseSpeed + speedAdjustment;
-        rightMotorSpeed = baseSpeed - speedAdjustment;
-
-        // Begrens motorhastighetene til -maxSpeed til maxSpeed
-        leftMotorSpeed = constrain(leftMotorSpeed, -maxSpeed, maxSpeed);
-        rightMotorSpeed = constrain(rightMotorSpeed, -maxSpeed, maxSpeed);
+    if (turningLeft) {
+        setMotorSpeed(-maxSpeed, maxSpeed);
+        Serial.println("Svinger til venstre.");
+        return;
     }
 
-    // Sett motorhastighetene
+    if (turningRight) {
+        setMotorSpeed(maxSpeed, -maxSpeed);
+        Serial.println("Svinger til høyre.");
+        return;
+    }
+
+    // Sjekk om ytterste venstre sensor (fysisk sensor 25, på pinne 32) er aktiv
+    int diff0 = abs(sensorValues[0] - startValues[0]);
+    if (diff0 > minDiff) {
+        turningLeft = true;
+        setMotorSpeed(-maxSpeed, maxSpeed);
+        Serial.println("Ytterste venstre sensor (25) aktiv - start sving til venstre.");
+        return;
+    }
+
+    // Sjekk om ytterste høyre sensor (fysisk sensor 1, på pinne 18) er aktiv
+    int diff14 = abs(sensorValues[sensorCount - 1] - startValues[sensorCount - 1]);
+    if (diff14 > minDiff) {
+        turningRight = true;
+        setMotorSpeed(maxSpeed, -maxSpeed);
+        Serial.println("Ytterste høyre sensor (1) aktiv - start sving til høyre.");
+        return;
+    }
+
+    // Beregn posisjonsfeil og motorhastigheter som normalt
+    float positionError = (totalWeight > 0) ? (float)weightedSum / totalWeight : 0;
+    float normalizedError = positionError / 7.0;
+    int speedAdjustment = (int)(maxSpeed * normalizedError);
+
+    int leftMotorSpeed = baseSpeed + speedAdjustment;
+    int rightMotorSpeed = baseSpeed - speedAdjustment;
+
     setMotorSpeed(leftMotorSpeed, rightMotorSpeed);
 
-    // Debugging-utskrifter
     Serial.print("Posisjonsfeil: ");
     Serial.println(normalizedError);
     Serial.print("Venstre motorhastighet: ");
@@ -190,8 +186,6 @@ void linjeOgMotor() {
     Serial.println(rightMotorSpeed);
 }
 
-
 void loop() {
-    linjeOgMotor();  // Kjør funksjonen for å sjekke sensorverdier og motorstyring
-    // Ingen delay for raskere respons
+    linjeOgMotor();
 }
